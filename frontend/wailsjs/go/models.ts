@@ -121,6 +121,36 @@ export namespace types {
 		}
 	}
 	
+	export class TaskStatus {
+	    isRunning: boolean;
+	    currentPhase: string;
+	    progress: number;
+	    processedFiles: number;
+	    totalFiles: number;
+	    processedSize: number;
+	    totalSize: number;
+	    speed: number;
+	    elapsedTime: number;
+	    estimatedTime: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new TaskStatus(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.isRunning = source["isRunning"];
+	        this.currentPhase = source["currentPhase"];
+	        this.progress = source["progress"];
+	        this.processedFiles = source["processedFiles"];
+	        this.totalFiles = source["totalFiles"];
+	        this.processedSize = source["processedSize"];
+	        this.totalSize = source["totalSize"];
+	        this.speed = source["speed"];
+	        this.elapsedTime = source["elapsedTime"];
+	        this.estimatedTime = source["estimatedTime"];
+	    }
+	}
 
 }
 
