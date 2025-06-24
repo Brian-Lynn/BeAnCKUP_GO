@@ -1,0 +1,665 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BeAnCKUP - 驾驶舱</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        body { font-family: 'Inter', 'Noto Sans SC', sans-serif; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #1f2937; }
+        ::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 3px;}
+        ::-webkit-scrollbar-thumb:hover { background: #6b7280; }
+        .tree ul { padding-left: 1rem; border-left: 1px solid #374151; }
+        .tree details[open] > summary ~ ul { display: block; }
+        .tree summary { list-style: none; } /* 隐藏默认的三角箭头 */
+        .tree summary::-webkit-details-marker { display: none; }
+        
+        /* 窗口最小尺寸限制 */
+        body { min-width: 900px; min-height: 600px; }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-300 flex flex-col h-screen overflow-hidden">
+
+    <!-- 顶部全局操作栏 -->
+    <header class="flex-shrink-0 bg-gray-800 border-b border-gray-700 px-4 py-2 flex justify-between items-center">
+        <div class="flex items-center space-x-3">
+            <div class="p-2 bg-indigo-600 rounded-lg"><i data-lucide="shield-check" class="w-5 h-5 text-white"></i></div>
+            <h1 class="text-lg font-bold text-white">BeAnCKUP</h1>
+        </div>
+        <div class="flex items-center space-x-4">
+            <button id="load-workspace-btn" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-lg shadow-md transition-colors flex items-center text-sm">
+                <i data-lucide="folder-search" class="w-4 h-4 mr-2"></i>加载工作区
+            </button>
+            <button id="restore-mode-btn" class="px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white font-semibold rounded-lg shadow-md transition-colors flex items-center text-sm">
+                 <i data-lucide="archive-restore" class="w-4 h-4 mr-2"></i>从压缩包恢复
+            </button>
+        </div>
+    </header>
+
+    <!-- 主内容区 - 三栏式驾驶舱 -->
+    <div class="flex flex-1 min-h-0">
+        <!-- 第一栏: 工作区浏览器 -->
+        <aside class="w-1/3 min-w-[300px] bg-gray-800/50 border-r border-gray-700 flex flex-col">
+            <div class="flex-shrink-0 p-3 border-b border-gray-700">
+                <div class="flex items-center justify-between">
+                    <h2 id="workspace-path-display" class="text-base font-semibold text-white truncate flex-1">工作区: 未加载</h2>
+                    <div class="flex items-center space-x-2 ml-2">
+                        <button id="refresh-tree-btn" class="p-1 text-gray-400 hover:text-white transition-colors" title="刷新">
+                            <i data-lucide="refresh-cw" class="w-4 h-4"></i>
+                        </button>
+                        <button id="collapse-all-btn" class="p-1 text-gray-400 hover:text-white transition-colors" title="全部折叠">
+                            <i data-lucide="unfold-vertical" class="w-4 h-4"></i>
+                        </button>
+                        <button id="expand-all-btn" class="p-1 text-gray-400 hover:text-white transition-colors" title="全部展开">
+                            <i data-lucide="fold-vertical" class="w-4 h-4"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <div id="file-tree-container" class="flex-1 p-3 overflow-y-auto">
+                <!-- 文件树将动态生成在这里 -->
+                <div class="text-center text-gray-500 mt-10">请先加载一个工作区...</div>
+            </div>
+        </aside>
+
+        <!-- 第二栏: 交付中心 -->
+        <aside class="w-1/3 min-w-[300px] bg-gray-800/30 border-r border-gray-700 flex flex-col">
+            <div class="flex-shrink-0 p-3 border-b border-gray-700">
+                <h2 class="text-base font-semibold text-white">交付中心</h2>
+            </div>
+            <div id="delivery-log-container" class="flex-1 p-3 overflow-y-auto">
+                <div class="space-y-3">
+                    <!-- 初始状态 -->
+                    <div class="text-center text-gray-500 mt-10">等待首次扫描...</div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- 第三栏: 任务控制台 -->
+        <aside class="w-1/3 min-w-[300px] bg-gray-800/20 flex flex-col">
+            <div class="flex-shrink-0 p-3 border-b border-gray-700">
+                <h2 class="text-base font-semibold text-white">任务控制台</h2>
+            </div>
+            <div class="flex-1 p-3 space-y-4">
+                <!-- 设置区 -->
+                <div class="space-y-3">
+                    <h3 class="text-sm font-semibold text-gray-300">设置</h3>
+                    <div class="space-y-2">
+                        <div>
+                            <label class="block text-xs text-gray-400 mb-1">备份交付路径</label>
+                            <div class="flex space-x-2">
+                                <input type="text" id="delivery-path" readonly placeholder="请选择交付路径..." class="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white text-sm focus:outline-none focus:border-indigo-500">
+                                <button id="select-delivery-path-btn" class="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors">
+                                    <i data-lucide="folder-open" class="w-4 h-4"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-xs text-gray-400 mb-1">单个包大小上限</label>
+                            <div class="flex space-x-2">
+                                <input type="number" id="max-package-size" value="2" min="0.1" max="100" step="0.1" class="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white text-sm focus:outline-none focus:border-indigo-500">
+                                <select id="package-size-unit" class="px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white text-sm focus:outline-none focus:border-indigo-500">
+                                    <option value="GB">GB</option>
+                                    <option value="MB">MB</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-xs text-gray-400 mb-1">本次任务总量上限</label>
+                            <div class="flex space-x-2">
+                                <input type="number" id="max-total-size" value="10" min="1" max="1000" step="1" class="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white text-sm focus:outline-none focus:border-indigo-500">
+                                <select id="total-size-unit" class="px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white text-sm focus:outline-none focus:border-indigo-500">
+                                    <option value="GB">GB</option>
+                                    <option value="MB">MB</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-xs text-gray-400 mb-1">加密密码（留空则不加密）</label>
+                            <div class="flex space-x-2">
+                                <input type="password" id="encryption-password" placeholder="输入密码启用加密" class="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white text-sm focus:outline-none focus:border-indigo-500">
+                                <button id="generate-password-btn" class="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors" title="生成随机密码">
+                                    <i data-lucide="refresh-cw" class="w-4 h-4"></i>
+                                </button>
+                                <button id="copy-password-btn" class="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors" title="复制密码">
+                                    <i data-lucide="copy" class="w-4 h-4"></i>
+                                </button>
+                            </div>
+                            <div id="password-warning" class="text-xs text-yellow-400 bg-yellow-900/20 p-2 rounded border border-yellow-600/30 mt-1" style="display: none;">
+                                <i data-lucide="alert-triangle" class="w-3 h-3 inline mr-1"></i>
+                                请妥善保管密码，丢失密码将无法恢复文件！
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 监控区 -->
+                <div class="space-y-3">
+                    <h3 class="text-sm font-semibold text-gray-300">监控</h3>
+                    <div class="space-y-2 text-sm">
+                        <div class="flex justify-between">
+                            <span class="text-gray-400">总进度:</span>
+                            <span id="total-progress" class="text-white">0%</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-gray-400">处理速度:</span>
+                            <span id="processing-speed" class="text-white">0 MB/s</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-gray-400">已耗时:</span>
+                            <span id="elapsed-time" class="text-white">00:00:00</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-gray-400">预估剩余:</span>
+                            <span id="estimated-time" class="text-white">--:--:--</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 操作区 -->
+                <div class="space-y-3">
+                    <h3 class="text-sm font-semibold text-gray-300">操作</h3>
+                    <button id="first-scan-btn" class="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-lg shadow-md transition-colors flex items-center justify-center text-sm">
+                        <i data-lucide="search" class="w-4 h-4 mr-2"></i>首次扫描
+                    </button>
+                    <button id="start-backup-btn" class="w-full py-3 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-lg shadow-md transition-colors flex items-center justify-center text-sm" style="display: none;">
+                        <i data-lucide="play" class="w-4 h-4 mr-2"></i>开始交付
+                    </button>
+                </div>
+            </div>
+        </aside>
+    </div>
+
+    <!-- 底部状态栏 -->
+    <footer id="footer-status" class="flex-shrink-0 bg-gray-800 border-t border-gray-700 px-4 py-1 text-xs text-gray-500">
+        引擎状态: 就绪
+    </footer>
+
+    <script>
+        // 全局变量
+        let currentWorkspacePath = '';
+        let currentTreeNodes = [];
+        let currentDeliveryPath = '';
+        let scanCompleted = false;
+        let startTime = null;
+
+        // 等待DOM加载完成
+        document.addEventListener('DOMContentLoaded', () => {
+            // 渲染图标
+            lucide.createIcons();
+
+            const loadWorkspaceBtn = document.getElementById('load-workspace-btn');
+            const workspacePathDisplay = document.getElementById('workspace-path-display');
+            const fileTreeContainer = document.getElementById('file-tree-container');
+            const footerStatus = document.getElementById('footer-status');
+            const firstScanBtn = document.getElementById('first-scan-btn');
+            const startBackupBtn = document.getElementById('start-backup-btn');
+            const refreshTreeBtn = document.getElementById('refresh-tree-btn');
+            const collapseAllBtn = document.getElementById('collapse-all-btn');
+            const expandAllBtn = document.getElementById('expand-all-btn');
+            const deliveryLogContainer = document.getElementById('delivery-log-container');
+            const deliveryPathInput = document.getElementById('delivery-path');
+            const selectDeliveryPathBtn = document.getElementById('select-delivery-path-btn');
+            const encryptionPassword = document.getElementById('encryption-password');
+            const generatePasswordBtn = document.getElementById('generate-password-btn');
+            const copyPasswordBtn = document.getElementById('copy-password-btn');
+            const passwordWarning = document.getElementById('password-warning');
+
+            // "加载工作区"按钮点击事件
+            loadWorkspaceBtn.addEventListener('click', () => {
+                // 调用 Go 后端的 SelectDirectory 方法
+                window.go.main.App.SelectDirectory().then(path => {
+                    if (path) {
+                        currentWorkspacePath = path;
+                        workspacePathDisplay.textContent = `工作区: ${path}`;
+                        workspacePathDisplay.title = path; // 鼠标悬浮时显示完整路径
+                        footerStatus.textContent = `状态: 工作区已加载`;
+                        
+                        // 重置状态
+                        scanCompleted = false;
+                        firstScanBtn.style.display = 'block';
+                        startBackupBtn.style.display = 'none';
+                        deliveryLogContainer.innerHTML = '<div class="text-center text-gray-500 mt-10">等待首次扫描...</div>';
+                        
+                        // 自动扫描工作区并更新树
+                        footerStatus.textContent = `状态: 正在扫描工作区...`;
+                        fileTreeContainer.innerHTML = `<div class="w-6 h-6 mx-auto mt-10 animate-spin"><i data-lucide="loader-2" class="w-full h-full text-indigo-400"></i></div>`;
+                        lucide.createIcons();
+
+                        window.go.main.App.ScanWorkspace(path).then(treeNodes => {
+                            currentTreeNodes = treeNodes;
+                            footerStatus.textContent = `状态: 工作区扫描完成！`;
+                            renderFileTree(treeNodes);
+                        }).catch(err => {
+                            footerStatus.textContent = `扫描失败: ${err}`;
+                            fileTreeContainer.innerHTML = '<div class="text-center text-red-500 mt-10">扫描失败，请检查工作区路径</div>';
+                            console.error('扫描错误:', err);
+                        });
+                    }
+                }).catch(err => {
+                     footerStatus.textContent = `错误: 未能选择目录.`;
+                });
+            });
+
+            // "选择交付路径"按钮点击事件
+            selectDeliveryPathBtn.addEventListener('click', () => {
+                window.go.main.App.SelectDirectory().then(path => {
+                    if (path) {
+                        currentDeliveryPath = path;
+                        deliveryPathInput.value = path;
+                        deliveryPathInput.title = path;
+                    }
+                }).catch(err => {
+                    footerStatus.textContent = `错误: 未能选择交付路径.`;
+                });
+            });
+
+            // "刷新"按钮点击事件
+            refreshTreeBtn.addEventListener('click', () => {
+                if (!currentWorkspacePath) {
+                    footerStatus.textContent = `错误: 请先加载工作区`;
+                    return;
+                }
+                
+                footerStatus.textContent = `状态: 正在刷新...`;
+                fileTreeContainer.innerHTML = `<div class="w-6 h-6 mx-auto mt-10 animate-spin"><i data-lucide="loader-2" class="w-full h-full text-indigo-400"></i></div>`;
+                lucide.createIcons();
+
+                window.go.main.App.ScanWorkspace(currentWorkspacePath).then(treeNodes => {
+                    currentTreeNodes = treeNodes;
+                    footerStatus.textContent = `状态: 刷新完成！`;
+                    renderFileTree(treeNodes);
+                }).catch(err => {
+                    footerStatus.textContent = `错误: ${err}`;
+                });
+            });
+
+            // "全部折叠"按钮点击事件
+            collapseAllBtn.addEventListener('click', () => {
+                const details = fileTreeContainer.querySelectorAll('details');
+                details.forEach(detail => {
+                    detail.removeAttribute('open');
+                });
+            });
+
+            // "全部展开"按钮点击事件
+            expandAllBtn.addEventListener('click', () => {
+                const details = fileTreeContainer.querySelectorAll('details');
+                details.forEach(detail => {
+                    detail.setAttribute('open', '');
+                });
+            });
+
+            // "首次扫描"按钮点击事件
+            firstScanBtn.addEventListener('click', () => {
+                if (!currentWorkspacePath) {
+                    footerStatus.textContent = `错误: 请先加载工作区`;
+                    return;
+                }
+
+                footerStatus.textContent = `状态: 正在首次扫描...`;
+                firstScanBtn.disabled = true;
+                firstScanBtn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 mr-2 animate-spin"></i>扫描中...';
+                lucide.createIcons();
+
+                // 重置进度
+                startTime = Date.now();
+                updateProgress({
+                    progress: 0,
+                    speed: 0,
+                    elapsedTime: 0,
+                    estimatedTime: 0,
+                    phase: "首次扫描"
+                });
+
+                // 调用后端的扫描方法
+                window.go.main.App.ScanWorkspace(currentWorkspacePath).then(treeNodes => {
+                    currentTreeNodes = treeNodes;
+                    scanCompleted = true;
+                    footerStatus.textContent = `状态: 首次扫描完成，发现 ${treeNodes ? treeNodes.length : 0} 个变更`;
+                    renderFileTree(treeNodes);
+                    
+                    // 显示开始交付按钮，隐藏首次扫描按钮
+                    firstScanBtn.style.display = 'none';
+                    startBackupBtn.style.display = 'block';
+                    
+                    // 预估交付包并显示在交付中心
+                    estimateAndShowEpisodes();
+                    
+                    firstScanBtn.disabled = false;
+                    firstScanBtn.innerHTML = '<i data-lucide="search" class="w-4 h-4 mr-2"></i>首次扫描';
+                    lucide.createIcons();
+                }).catch(err => {
+                    footerStatus.textContent = `扫描失败: ${err}`;
+                    firstScanBtn.disabled = false;
+                    firstScanBtn.innerHTML = '<i data-lucide="search" class="w-4 h-4 mr-2"></i>首次扫描';
+                    lucide.createIcons();
+                    console.error('首次扫描错误:', err);
+                });
+            });
+
+            // 预估并显示交付包
+            function estimateAndShowEpisodes() {
+                if (!currentWorkspacePath) {
+                    deliveryLogContainer.innerHTML = '<div class="text-center text-gray-500 mt-10">请先加载工作区</div>';
+                    return;
+                }
+
+                if (!currentDeliveryPath) {
+                    deliveryLogContainer.innerHTML = '<div class="text-center text-gray-500 mt-10">请先选择交付路径</div>';
+                    return;
+                }
+
+                // 获取用户设置并转换单位
+                const maxPackageSize = parseFloat(document.getElementById('max-package-size').value);
+                const maxTotalSize = parseFloat(document.getElementById('max-total-size').value);
+                const packageSizeUnit = document.getElementById('package-size-unit').value;
+                const totalSizeUnit = document.getElementById('total-size-unit').value;
+
+                // 转换为GB
+                const maxPackageSizeGB = convertToGB(maxPackageSize, packageSizeUnit);
+                const maxTotalSizeGB = convertToGB(maxTotalSize, totalSizeUnit);
+
+                // 调用后端的备份准备方法
+                window.go.main.App.StartBackupPreparation(currentWorkspacePath, maxPackageSizeGB, maxTotalSizeGB).then(episodes => {
+                    renderDeliveryLog(episodes);
+                }).catch(err => {
+                    deliveryLogContainer.innerHTML = `<div class="text-center text-red-500 mt-10">预估失败: ${err}</div>`;
+                    console.error('预估错误:', err);
+                });
+            }
+
+            // "开始交付"按钮点击事件
+            startBackupBtn.addEventListener('click', () => {
+                if (!currentWorkspacePath) {
+                    footerStatus.textContent = `错误: 请先加载工作区`;
+                    return;
+                }
+
+                if (!currentDeliveryPath) {
+                    footerStatus.textContent = `错误: 请先选择交付路径`;
+                    return;
+                }
+
+                footerStatus.textContent = `状态: 正在准备交付...`;
+                startBackupBtn.disabled = true;
+                startBackupBtn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 mr-2 animate-spin"></i>准备中...';
+                lucide.createIcons();
+
+                // 获取用户设置并转换单位
+                const maxPackageSize = parseFloat(document.getElementById('max-package-size').value);
+                const maxTotalSize = parseFloat(document.getElementById('max-total-size').value);
+                const packageSizeUnit = document.getElementById('package-size-unit').value;
+                const totalSizeUnit = document.getElementById('total-size-unit').value;
+
+                // 转换为GB
+                const maxPackageSizeGB = convertToGB(maxPackageSize, packageSizeUnit);
+                const maxTotalSizeGB = convertToGB(maxTotalSize, totalSizeUnit);
+
+                // 获取加密密码
+                const password = encryptionPassword.value;
+
+                // 调用后端的备份执行方法
+                window.go.main.App.StartBackupExecution(currentWorkspacePath, currentDeliveryPath, maxPackageSizeGB, maxTotalSizeGB, password).then(result => {
+                    footerStatus.textContent = `状态: 交付完成！`;
+                    startBackupBtn.disabled = false;
+                    startBackupBtn.innerHTML = '<i data-lucide="play" class="w-4 h-4 mr-2"></i>开始交付';
+                    lucide.createIcons();
+                    
+                    // 更新交付日志状态
+                    if (result && result.episodes) {
+                        const logHtml = result.episodes.map(episode => `
+                            <div class="bg-gray-700/50 rounded-lg p-3 episode-item" data-episode-id="${episode.id}">
+                                <div class="flex items-center justify-between mb-2">
+                                    <h3 class="font-semibold text-white">${episode.name}</h3>
+                                    <span class="text-xs bg-gray-600 text-white px-2 py-1 rounded episode-status">${episode.status}</span>
+                                </div>
+                                <div class="space-y-2 text-sm">
+                                    <div class="flex justify-between">
+                                        <span class="text-gray-400">实际大小:</span>
+                                        <span class="text-white">${formatFileSize(episode.totalSize)}</span>
+                                    </div>
+                                    <div class="flex justify-between">
+                                        <span class="text-gray-400">文件数量:</span>
+                                        <span class="text-white">${episode.fileCount}</span>
+                                    </div>
+                                    <div class="flex justify-between">
+                                        <span class="text-gray-400">包路径:</span>
+                                        <span class="text-white text-xs truncate">${episode.packagePath}</span>
+                                    </div>
+                                </div>
+                            </div>
+                        `).join('');
+                        deliveryLogContainer.innerHTML = `<div class="space-y-3">${logHtml}</div>`;
+                    }
+                }).catch(err => {
+                    footerStatus.textContent = `错误: ${err}`;
+                    startBackupBtn.disabled = false;
+                    startBackupBtn.innerHTML = '<i data-lucide="play" class="w-4 h-4 mr-2"></i>开始交付';
+                    lucide.createIcons();
+                });
+            });
+
+            // 监听来自后端的、统一的进度更新事件
+            window.runtime.EventsOn("task-progress", (data) => {
+                // data 应该包含: totalProgress, currentSpeed, elapsedTime, estimatedTime, currentPhase
+                document.getElementById('total-progress').textContent = `${Math.round(data.totalProgress * 100)}%`;
+                document.getElementById('processing-speed').textContent = `${data.currentSpeed.toFixed(2)} MB/s`;
+                document.getElementById('elapsed-time').textContent = formatTime(data.elapsedTime);
+                document.getElementById('estimated-time').textContent = formatTime(data.estimatedTime);
+                document.getElementById('footer-status').textContent = `状态: ${data.currentPhase} - ${Math.round(data.totalProgress * 100)}%`;
+            });
+
+            // 监听交付包状态更新事件
+            window.runtime.EventsOn("episode-status-update", (data) => {
+                // data 应该包含: episodeName, status (例如: "打包中", "已完成", "失败")
+                const episodeElements = document.querySelectorAll('.episode-item');
+                episodeElements.forEach(element => {
+                    const nameElement = element.querySelector('h3');
+                    if (nameElement && nameElement.textContent === data.episodeName) {
+                        const statusElement = element.querySelector('.episode-status');
+                        statusElement.textContent = data.status;
+                        // 根据状态更新颜色
+                        if (data.status === '已完成') {
+                            statusElement.className = 'text-xs bg-green-600 text-white px-2 py-1 rounded episode-status';
+                        } else if (data.status === '失败') {
+                            statusElement.className = 'text-xs bg-red-600 text-white px-2 py-1 rounded episode-status';
+                        } else {
+                            statusElement.className = 'text-xs bg-blue-600 text-white px-2 py-1 rounded episode-status';
+                        }
+                    }
+                });
+            });
+
+            // 监听任务完成事件
+            window.runtime.EventsOn("task-complete", (data) => {
+                // data 应该包含: success (bool), message (string)
+                if(data.success) {
+                    document.getElementById('footer-status').textContent = '任务成功完成！';
+                    showNotification(data.message, 'success');
+                } else {
+                    document.getElementById('footer-status').textContent = `任务失败: ${data.message}`;
+                    showNotification(data.message, 'error');
+                }
+                // 让操作按钮恢复可用
+                const startBackupBtn = document.getElementById('start-backup-btn');
+                startBackupBtn.disabled = false;
+                startBackupBtn.innerHTML = '<i data-lucide="play" class="w-4 h-4 mr-2"></i>再次开始交付';
+                lucide.createIcons();
+            });
+
+            // 渲染文件树的核心函数
+            function renderFileTree(nodes) {
+                if (!nodes || nodes.length === 0) {
+                    fileTreeContainer.innerHTML = '<div class="text-center text-gray-500 mt-10">未发现任何变更。</div>';
+                    return;
+                }
+                
+                // 对节点进行排序：文件夹在前，同类型按名称排序
+                const sortedNodes = sortNodes(nodes);
+                const treeHtml = `<ul class="text-sm space-y-1 tree">${sortedNodes.map(createNodeHtml).join('')}</ul>`;
+                fileTreeContainer.innerHTML = treeHtml;
+                lucide.createIcons(); // 重新渲染新生成的图标
+            }
+
+            // 排序函数
+            function sortNodes(nodes) {
+                return nodes.sort((a, b) => {
+                    // 文件夹排在文件前面
+                    if (a.isDir && !b.isDir) return -1;
+                    if (!a.isDir && b.isDir) return 1;
+                    // 同类型按名称排序
+                    return a.name.localeCompare(b.name);
+                }).map(node => {
+                    // 递归排序子节点
+                    if (node.children && node.children.length > 0) {
+                        node.children = sortNodes(node.children);
+                    }
+                    return node;
+                });
+            }
+
+            function createNodeHtml(node) {
+                const icon = getIconForNode(node);
+                const color = getColorForStatus(node.status);
+                const childrenHtml = node.children ? `<ul class="mt-1 space-y-1">${node.children.map(createNodeHtml).join('')}</ul>` : '';
+
+                if (node.isDir) {
+                    return `
+                        <li>
+                            <details class="space-y-1">
+                                <summary class="flex items-center space-x-2 cursor-pointer p-1 rounded hover:bg-gray-700">
+                                    <i data-lucide="${icon}" class="w-4 h-4 ${color}"></i>
+                                    <span class="${color}">${node.name}</span>
+                                </summary>
+                                ${childrenHtml}
+                            </details>
+                        </li>`;
+                } else {
+                    return `<li class="flex items-center space-x-2 p-1 ${color}"><i data-lucide="${icon}" class="w-4 h-4"></i><span>${node.name} (${node.status})</span></li>`;
+                }
+            }
+
+            // 渲染交付日志
+            function renderDeliveryLog(episodes) {
+                if (!episodes || episodes.length === 0) {
+                    deliveryLogContainer.innerHTML = '<div class="text-center text-gray-500 mt-10">暂无交付包</div>';
+                    return;
+                }
+
+                const logHtml = episodes.map(episode => `
+                    <div class="bg-gray-700/50 rounded-lg p-3 episode-item" data-episode-id="${episode.id}">
+                        <div class="flex items-center justify-between mb-2">
+                            <h3 class="font-semibold text-white">${episode.name}</h3>
+                            <span class="text-xs bg-gray-600 text-white px-2 py-1 rounded episode-status">${episode.status}</span>
+                        </div>
+                        <div class="space-y-2 text-sm">
+                            <div class="flex justify-between">
+                                <span class="text-gray-400">预估大小:</span>
+                                <span class="text-white">${formatFileSize(episode.estimatedSize)}</span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-gray-400">文件数量:</span>
+                                <span class="text-white">${episode.fileCount}</span>
+                            </div>
+                        </div>
+                    </div>
+                `).join('');
+
+                deliveryLogContainer.innerHTML = `<div class="space-y-3">${logHtml}</div>`;
+            }
+
+            function getIconForNode(node) {
+                if (node.isDir) return 'folder';
+                switch(node.status) {
+                    case 'new': return 'file-plus-2';
+                    case 'modified': return 'file-diff';
+                    default: return 'file';
+                }
+            }
+
+            function getColorForStatus(status) {
+                 switch(status) {
+                    case 'new': return 'text-yellow-400';
+                    case 'modified': return 'text-blue-400';
+                    default: return 'text-gray-300';
+                }
+            }
+
+            function formatFileSize(bytes) {
+                if (bytes === 0) return '0 B';
+                const k = 1024;
+                const sizes = ['B', 'KB', 'MB', 'GB'];
+                const i = Math.floor(Math.log(bytes) / Math.log(k));
+                return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+            }
+
+            function formatTime(seconds) {
+                const hours = Math.floor(seconds / 3600);
+                const minutes = Math.floor((seconds % 3600) / 60);
+                const secs = seconds % 60;
+                return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+            }
+
+            function convertToGB(value, unit) {
+                switch(unit) {
+                    case 'MB':
+                        return value / 1024;
+                    case 'GB':
+                        return value;
+                    default:
+                        return value;
+                }
+            }
+
+            // 生成随机密码
+            generatePasswordBtn.addEventListener('click', () => {
+                window.go.main.App.GeneratePassword().then(password => {
+                    encryptionPassword.value = password;
+                    passwordWarning.style.display = 'block';
+                    showNotification('已生成高强度密码，请妥善保存！', 'warning');
+                }).catch(err => {
+                    showNotification('生成密码失败: ' + err, 'error');
+                });
+            });
+
+            // 复制密码
+            copyPasswordBtn.addEventListener('click', () => {
+                if (encryptionPassword.value) {
+                    window.go.main.App.CopyToClipboard(encryptionPassword.value).then(() => {
+                        showNotification('密码已复制到剪贴板', 'success');
+                    }).catch(err => {
+                        showNotification('复制失败: ' + err, 'error');
+                    });
+                } else {
+                    showNotification('请先输入或生成密码', 'error');
+                }
+            });
+
+            // 密码输入时动态显示警告
+            encryptionPassword.addEventListener('input', () => {
+                passwordWarning.style.display = encryptionPassword.value ? 'block' : 'none';
+            });
+
+            // 显示通知
+            function showNotification(message, type = 'info') {
+                const notification = document.createElement('div');
+                notification.className = `fixed top-4 right-4 p-3 rounded-lg text-white text-sm z-50 ${
+                    type === 'success' ? 'bg-green-600' : 
+                    type === 'error' ? 'bg-red-600' : 
+                    type === 'warning' ? 'bg-yellow-600' : 'bg-blue-600'
+                }`;
+                notification.textContent = message;
+                document.body.appendChild(notification);
+                setTimeout(() => {
+                    notification.remove();
+                }, 3000);
+            }
+        });
+    </script>
+</body>
+</html> 

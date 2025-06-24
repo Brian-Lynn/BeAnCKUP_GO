@@ -1,0 +1,19 @@
+{
+  "name": "BeAnCKUP",
+  "outputfilename": "beanckup",
+  "frontend:install": "",
+  "frontend:build": "",
+  "frontend:dev:watcher": "",
+  "frontend:dev:serverUrl": "",
+  "author": {
+    "name": "BeAnCKUP Team",
+    "email": "team@beanckup.com"
+  },
+  "info": {
+    "companyName": "BeAnCKUP Team",
+    "productName": "BeAnCKUP",
+    "productVersion": "1.0.0",
+    "copyright": "Copyright © 2024 BeAnCKUP Team",
+    "comments": "功能强大、性能卓越的桌面备份工具"
+  }
+} 
