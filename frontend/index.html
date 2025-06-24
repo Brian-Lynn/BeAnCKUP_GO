@@ -121,7 +121,7 @@
                         <div>
                             <label class="block text-xs text-gray-400 mb-1">加密密码（留空则不加密）</label>
                             <div class="flex space-x-2">
-                                <input type="password" id="encryption-password" placeholder="输入密码启用加密" class="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white text-sm focus:outline-none focus:border-indigo-500">
+                                <input type="text" id="encryption-password" placeholder="输入密码启用加密" class="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white text-sm focus:outline-none focus:border-indigo-500">
                                 <button id="generate-password-btn" class="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors" title="生成随机密码">
                                     <i data-lucide="refresh-cw" class="w-4 h-4"></i>
                                 </button>
@@ -208,6 +208,13 @@
             const generatePasswordBtn = document.getElementById('generate-password-btn');
             const copyPasswordBtn = document.getElementById('copy-password-btn');
             const passwordWarning = document.getElementById('password-warning');
+
+            // 监听来自Go后端的扫描进度事件
+            runtime.EventsOn("scan-progress", (progress) => {
+                if (progress && progress.total > 0) {
+                    footerStatus.textContent = `状态: 正在扫描 (${progress.processed}/${progress.total})`;
+                }
+            });
 
             // "加载工作区"按钮点击事件
             loadWorkspaceBtn.addEventListener('click', () => {
@@ -300,78 +307,55 @@
                     footerStatus.textContent = `错误: 请先加载工作区`;
                     return;
                 }
+                 if (!currentDeliveryPath) {
+                    footerStatus.textContent = `错误: 请先选择交付路径`;
+                    showNotification('请先在右侧选择交付路径', 'error');
+                    return;
+                }
 
-                footerStatus.textContent = `状态: 正在首次扫描...`;
+                footerStatus.textContent = `状态: 正在进行备份预处理...`;
                 firstScanBtn.disabled = true;
-                firstScanBtn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 mr-2 animate-spin"></i>扫描中...';
+                firstScanBtn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 mr-2 animate-spin"></i>预处理中...';
                 lucide.createIcons();
+                
+                // 获取用户设置
+                const maxPackageSizeGB = getSettingInGB('max-package-size', 'package-size-unit');
+                const maxTotalSizeGB = getSettingInGB('max-total-size', 'total-size-unit');
 
-                // 重置进度
-                startTime = Date.now();
-                updateProgress({
-                    progress: 0,
-                    speed: 0,
-                    elapsedTime: 0,
-                    estimatedTime: 0,
-                    phase: "首次扫描"
-                });
-
-                // 调用后端的扫描方法
-                window.go.main.App.ScanWorkspace(currentWorkspacePath).then(treeNodes => {
-                    currentTreeNodes = treeNodes;
+                // 直接调用后端的完整准备方法
+                window.go.main.App.StartBackupPreparation(currentWorkspacePath, maxPackageSizeGB, maxTotalSizeGB).then(result => {
+                    if(!result) {
+                        footerStatus.textContent = `状态: 未发现任何变更。`;
+                        fileTreeContainer.innerHTML = '<div class="text-center text-gray-500 mt-10">未发现任何变更。</div>';
+                        deliveryLogContainer.innerHTML = '<div class="text-center text-gray-500 mt-10">无需交付</div>';
+                        return;
+                    }
+                    
+                    currentTreeNodes = result.fileTree;
                     scanCompleted = true;
-                    footerStatus.textContent = `状态: 首次扫描完成，发现 ${treeNodes ? treeNodes.length : 0} 个变更`;
-                    renderFileTree(treeNodes);
+                    
+                    const { newCount, modifiedCount, deletedCount, totalSize } = result.changeInfo;
+                    footerStatus.textContent = `状态: 预处理完成！发现 ${newCount} 新增, ${modifiedCount} 修改, ${deletedCount} 删除. 总大小: ${formatFileSize(totalSize)}`;
+                    
+                    // 渲染UI
+                    renderFileTree(result.fileTree);
+                    renderDeliveryLog(result.episodes);
                     
                     // 显示开始交付按钮，隐藏首次扫描按钮
                     firstScanBtn.style.display = 'none';
                     startBackupBtn.style.display = 'block';
-                    
-                    // 预估交付包并显示在交付中心
-                    estimateAndShowEpisodes();
-                    
-                    firstScanBtn.disabled = false;
-                    firstScanBtn.innerHTML = '<i data-lucide="search" class="w-4 h-4 mr-2"></i>首次扫描';
-                    lucide.createIcons();
+
                 }).catch(err => {
-                    footerStatus.textContent = `扫描失败: ${err}`;
+                    footerStatus.textContent = `预处理失败: ${err}`;
+                    showNotification(`预处理失败: ${err}`, 'error');
+                    console.error('预处理错误:', err);
+                }).finally(() => {
+                    // 恢复按钮状态
                     firstScanBtn.disabled = false;
                     firstScanBtn.innerHTML = '<i data-lucide="search" class="w-4 h-4 mr-2"></i>首次扫描';
                     lucide.createIcons();
-                    console.error('首次扫描错误:', err);
                 });
             });
-
-            // 预估并显示交付包
-            function estimateAndShowEpisodes() {
-                if (!currentWorkspacePath) {
-                    deliveryLogContainer.innerHTML = '<div class="text-center text-gray-500 mt-10">请先加载工作区</div>';
-                    return;
-                }
-
-                if (!currentDeliveryPath) {
-                    deliveryLogContainer.innerHTML = '<div class="text-center text-gray-500 mt-10">请先选择交付路径</div>';
-                    return;
-                }
-
-                // 获取用户设置并转换单位
-                const maxPackageSize = parseFloat(document.getElementById('max-package-size').value);
-                const maxTotalSize = parseFloat(document.getElementById('max-total-size').value);
-                const packageSizeUnit = document.getElementById('package-size-unit').value;
-                const totalSizeUnit = document.getElementById('total-size-unit').value;
-
-                // 转换为GB
-                const maxPackageSizeGB = convertToGB(maxPackageSize, packageSizeUnit);
-                const maxTotalSizeGB = convertToGB(maxTotalSize, totalSizeUnit);
-
-                // 调用后端的备份准备方法
-                window.go.main.App.StartBackupPreparation(currentWorkspacePath, maxPackageSizeGB, maxTotalSizeGB).then(episodes => {
-                    renderDeliveryLog(episodes);
-                }).catch(err => {
-                    deliveryLogContainer.innerHTML = `<div class="text-center text-red-500 mt-10">预估失败: ${err}</div>`;
-                    console.error('预估错误:', err);
-                });
-            }
 
             // "开始交付"按钮点击事件
             startBackupBtn.addEventListener('click', () => {
@@ -605,6 +589,12 @@
                 return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
             }
 
+            function getSettingInGB(inputId, unitId) {
+                const value = parseFloat(document.getElementById(inputId).value);
+                const unit = document.getElementById(unitId).value;
+                return convertToGB(value, unit);
+            }
+
             function convertToGB(value, unit) {
                 switch(unit) {
                     case 'MB':
@@ -616,15 +606,17 @@
                 }
             }
 
-            // 生成随机密码
+            // 生成随机密码（前端实现）
             generatePasswordBtn.addEventListener('click', () => {
-                window.go.main.App.GeneratePassword().then(password => {
-                    encryptionPassword.value = password;
-                    passwordWarning.style.display = 'block';
-                    showNotification('已生成高强度密码，请妥善保存！', 'warning');
-                }).catch(err => {
-                    showNotification('生成密码失败: ' + err, 'error');
-                });
+                const charset = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()_+-=[]{}|;:,.<>?';
+                let password = '';
+                for (let i = 0; i < 20; i++) {
+                    const randomIndex = Math.floor(Math.random() * charset.length);
+                    password += charset[randomIndex];
+                }
+                encryptionPassword.value = password;
+                passwordWarning.style.display = 'block';
+                showNotification('已生成高强度密码，请妥善保存！', 'warning');
             });
 
             // 复制密码

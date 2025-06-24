@@ -4,6 +4,9 @@ import (
 	"time"
 )
 
+// Debug 控制开关，调试批量输出时可设为 true，正式环境请保持为 false
+const DebugMode = false
+
 // FileInfo 文件信息
 type FileInfo struct {
 	Path        string     `json:"path"`
@@ -128,6 +131,7 @@ type Manifest struct {
 	Directories map[string]*DirInfo    `json:"directories"`
 	Metadata    map[string]interface{} `json:"metadata"`
 	HashToFile  map[string]string      `json:"hashToFile"` // 哈希值到文件路径的映射，用于去重
+	Dirs        map[string]*DirInfo    `json:"dirs"`       // key 是目录绝对路径
 }
 
 // DirInfo 目录信息
@@ -156,4 +160,16 @@ type TreeNode struct {
 	IsDir    bool        `json:"isDir"`
 	Status   FileStatus  `json:"status,omitempty"`
 	Children []*TreeNode `json:"children,omitempty"`
+}
+
+// BackupPreparationResult 是 "首次扫描" (StartBackupPreparation) 成功后返回给前端的聚合数据
+type BackupPreparationResult struct {
+	Episodes   []*Episode  `json:"episodes"`
+	FileTree   []*TreeNode `json:"fileTree"`
+	ChangeInfo struct {
+		NewCount      int   `json:"newCount"`
+		ModifiedCount int   `json:"modifiedCount"`
+		DeletedCount  int   `json:"deletedCount"`
+		TotalSize     int64 `json:"totalSize"`
+	} `json:"changeInfo"`
 }

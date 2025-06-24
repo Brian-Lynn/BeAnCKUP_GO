@@ -130,6 +130,7 @@ func (m *Manager) StartWorkerPool(suspectFiles map[string]*types.FileInfo, numWo
 	for hashResult := range resultChan {
 		if hashResult.Error != nil {
 			// 记录错误但继续处理
+			fmt.Fprintf(os.Stderr, "[ERROR] %v\n", hashResult.Error)
 			continue
 		}
 

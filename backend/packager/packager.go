@@ -119,9 +119,8 @@ func (m *Manager) createTempFileListWithAbsolutePaths(filesToPack []*types.FileI
 	// 写入文件路径
 	writer := bufio.NewWriter(tempFile)
 
-	// 先写入manifest和index（相对路径）
+	// 先写入manifest（相对路径）
 	writer.WriteString("manifest.json\n")
-	writer.WriteString("index.json\n")
 
 	// 再写入用户文件（绝对路径）
 	for _, file := range filesToPack {

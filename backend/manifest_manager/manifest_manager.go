@@ -3,94 +3,120 @@ package manifest_manager
 import (
 	"beanckup/backend/types"
 	"encoding/json"
-	"fmt"
+	"io/ioutil"
+	"log"
 	"os"
 	"path/filepath"
 	"time"
 )
 
-// Manager 清单管理器
+const (
+	manifestDir  = ".beanckup"
+	manifestFile = "manifest.json"
+)
+
+// Manager 负责清单文件的读取和写入
 type Manager struct{}
 
-// NewManager 创建新的清单管理器
+// NewManager 创建一个新的清单管理器
 func NewManager() *Manager {
 	return &Manager{}
 }
 
-// getManifestPath 返回一个工作区内清单文件的唯一、绝对路径
-func getManifestPath(workspacePath string) string {
-	return filepath.Join(workspacePath, ".beanckup", "manifest.json")
+// getManifestPath 返回清单文件的标准绝对路径
+func (m *Manager) getManifestPath(workspacePath string) string {
+	return filepath.Join(workspacePath, manifestDir, manifestFile)
 }
 
-// LoadLatestManifest 加载最新的清单文件
+// LoadLatestManifest 从工作区加载最新的清单文件
+// 如果清单不存在或损坏，则返回一个新的空清单，不返回错误
 func (m *Manager) LoadLatestManifest(workspacePath string) (*types.Manifest, error) {
-	manifestPath := getManifestPath(workspacePath)
+	manifestPath := m.getManifestPath(workspacePath)
+	log.Printf("ManifestManager: Attempting to load manifest from %s", manifestPath)
 
-	// 检查文件是否存在
 	if _, err := os.Stat(manifestPath); os.IsNotExist(err) {
-		// 文件不存在，是首次备份。返回一个全新的、空的清单对象，不要报错。
+		log.Println("ManifestManager: Manifest file not found. Creating a new empty manifest.")
+		// 文件不存在，是首次备份，返回一个空的清单对象
 		return &types.Manifest{
 			Version:    "1.0",
 			CreatedAt:  time.Now(),
 			Files:      make(map[string]*types.FileInfo),
+			Dirs:       make(map[string]*types.DirInfo),
 			HashToFile: make(map[string]string),
 		}, nil
 	}
 
 	// 文件存在，读取并解析
-	data, err := os.ReadFile(manifestPath)
+	data, err := ioutil.ReadFile(manifestPath)
 	if err != nil {
-		return nil, fmt.Errorf("读取清单文件失败: %w", err)
-	}
-
-	var manifest types.Manifest
-	if err := json.Unmarshal(data, &manifest); err != nil {
-		// 如果JSON解析失败，可能文件已损坏。返回一个空的清单并记录错误，让用户可以重新开始。
-		fmt.Fprintf(os.Stderr, "警告: 清单文件 %s 已损坏，将作为首次备份处理。错误: %v\n", manifestPath, err)
+		log.Printf("ManifestManager: Error reading manifest file: %v. Returning a new empty manifest.", err)
+		// 读取失败也返回新清单，保证程序健灸性
 		return &types.Manifest{
 			Version:    "1.0",
 			CreatedAt:  time.Now(),
 			Files:      make(map[string]*types.FileInfo),
+			Dirs:       make(map[string]*types.DirInfo),
 			HashToFile: make(map[string]string),
 		}, nil
 	}
 
+	var manifest types.Manifest
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		log.Printf("ManifestManager: Error unmarshalling manifest JSON: %v. Returning a new empty manifest.", err)
+		// 解析失败也返回新清单
+		return &types.Manifest{
+			Version:    "1.0",
+			CreatedAt:  time.Now(),
+			Files:      make(map[string]*types.FileInfo),
+			Dirs:       make(map[string]*types.DirInfo),
+			HashToFile: make(map[string]string),
+		}, nil
+	}
+
+	// 为了后续处理方便，确保map不是nil
+	if manifest.Files == nil {
+		manifest.Files = make(map[string]*types.FileInfo)
+	}
+	if manifest.Dirs == nil {
+		manifest.Dirs = make(map[string]*types.DirInfo)
+	}
+	if manifest.HashToFile == nil {
+		manifest.HashToFile = make(map[string]string)
+	}
+
+	log.Printf("ManifestManager: Successfully loaded manifest created at %s", manifest.CreatedAt)
 	return &manifest, nil
 }
 
-// SaveManifest 将最终清单保存到工作区内的.beanckup目录和交付路径下
+// SaveManifest 将清单文件保存到工作区和交付路径
 func (m *Manager) SaveManifest(workspacePath, deliveryPath string, manifest *types.Manifest) error {
-	// 确保manifest对象不为空
-	if manifest == nil {
-		return fmt.Errorf("不能保存空的清单")
-	}
-
-	// 更新时间戳
-	manifest.CreatedAt = time.Now()
-
-	// 序列化清单为JSON
 	data, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {
-		return fmt.Errorf("序列化清单失败: %w", err)
+		log.Printf("ManifestManager: Error marshalling manifest to JSON: %v", err)
+		return err
 	}
 
-	// 1. 保存到工作区的.beanckup目录 (这是唯一的真相来源)
-	beanckupDir := filepath.Join(workspacePath, ".beanckup")
-	if err := os.MkdirAll(beanckupDir, 0755); err != nil {
-		return fmt.Errorf("创建.beanckup目录失败: %w", err)
+	// 1. 保存到工作区
+	workspaceManifestPath := m.getManifestPath(workspacePath)
+	// 确保 .beanckup 目录存在
+	if err := os.MkdirAll(filepath.Dir(workspaceManifestPath), 0755); err != nil {
+		log.Printf("ManifestManager: Error creating .beanckup directory in workspace: %v", err)
+		return err
 	}
-	workspaceManifestPath := getManifestPath(workspacePath)
-	if err := os.WriteFile(workspaceManifestPath, data, 0644); err != nil {
-		return fmt.Errorf("写入工作区清单失败: %w", err)
+	if err := ioutil.WriteFile(workspaceManifestPath, data, 0644); err != nil {
+		log.Printf("ManifestManager: Error writing manifest to workspace: %v", err)
+		return err
 	}
+	log.Printf("ManifestManager: Successfully saved manifest to %s", workspaceManifestPath)
 
-	// 2. 为了便携性，复制一份到交付路径
+	// 2. 如果提供了交付路径，也保存一份到交付路径
 	if deliveryPath != "" {
-		deliveryManifestPath := filepath.Join(deliveryPath, fmt.Sprintf("%s-manifest.json", manifest.SeriesID))
-		if err := os.WriteFile(deliveryManifestPath, data, 0644); err != nil {
-			// 即使这里失败，也不应算作致命错误，只打印警告
-			fmt.Fprintf(os.Stderr, "警告: 复制清单到交付路径失败: %v\n", err)
+		deliveryManifestPath := filepath.Join(deliveryPath, manifestFile)
+		if err := ioutil.WriteFile(deliveryManifestPath, data, 0644); err != nil {
+			log.Printf("ManifestManager: Error writing manifest to delivery path: %v", err)
+			return err
 		}
+		log.Printf("ManifestManager: Successfully saved manifest to %s", deliveryManifestPath)
 	}
 
 	return nil

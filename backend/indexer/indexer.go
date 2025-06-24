@@ -2,6 +2,8 @@ package indexer
 
 import (
 	"beanckup/backend/types"
+	"io/fs"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,84 +24,104 @@ type Indexer interface {
 	GetScanStatus() string
 }
 
-// Manager 索引器实现
+// Manager 索引器，负责所有与文件发现、状态对比相关的任务
 type Manager struct {
-	scanProgress float64
-	scanStatus   string
-	scannedFiles int
-	totalFiles   int
+	// 可以在这里添加一些配置，例如要忽略的目录模式等
 }
 
-// NewManager 创建新的索引器
+// NewManager 创建一个新的索引器实例
 func NewManager() *Manager {
-	return &Manager{
-		scanProgress: 0.0,
-		scanStatus:   "就绪",
-	}
+	return &Manager{}
 }
 
-// ScanWorkspace 扫描工作区，返回当前所有文件的元数据
-func (i *Manager) ScanWorkspace(workspacePath string) (map[string]*types.FileInfo, error) {
-	currentFiles := make(map[string]*types.FileInfo)
+// ProgressCallback 是一个回调函数类型，用于在扫描过程中报告进度
+type ProgressCallback func(processedCount int, totalCount int)
 
-	err := filepath.Walk(workspacePath, func(path string, info os.FileInfo, err error) error {
+// ScanWorkspace 扫描指定路径下的所有文件，并返回它们的信息
+// 这个实现是健壮的，可以处理符号链接并提供进度报告
+func (m *Manager) ScanWorkspace(workspacePath string, callback ProgressCallback) (map[string]*types.FileInfo, error) {
+	log.Printf("Indexer: Starting to scan workspace: %s", workspacePath)
+	files := make(map[string]*types.FileInfo)
+
+	// 第一步：先遍历一次，统计文件总数，用于计算进度
+	var totalFiles int
+	filepath.WalkDir(workspacePath, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
+		// 忽略 .beanckup 目录和符号链接
+		if strings.Contains(path, ".beanckup") || d.Type()&os.ModeSymlink != 0 {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !d.IsDir() {
+			totalFiles++
+		}
+		return nil
+	})
+	log.Printf("Indexer: Found %d total files to process.", totalFiles)
 
-		// 忽略 .beanckup 目录及其内容
-		if strings.Contains(path, ".beanckup") {
-			if info.IsDir() {
+	// 第二步：正式遍历，收集文件信息
+	var processedFiles int
+	err := filepath.WalkDir(workspacePath, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			log.Printf("Indexer: Error accessing path %s: %v", path, err)
+			return err
+		}
+
+		// 忽略 .beanckup 目录和符号链接
+		if strings.Contains(path, ".beanckup") || d.Type()&os.ModeSymlink != 0 {
+			if d.IsDir() {
+				log.Printf("Indexer: Skipping directory: %s", path)
 				return filepath.SkipDir
 			}
 			return nil
 		}
 
-		// 只处理文件，跳过目录
-		if info.IsDir() {
-			return nil
+		if d.IsDir() {
+			return nil // 是目录，直接返回
 		}
 
-		// 忽略标准交付包文件（工作区名-S开头的.7z文件）
-		fileName := info.Name()
-		if strings.HasSuffix(fileName, ".7z") && strings.Contains(fileName, "-S") {
-			// 检查是否符合标准交付包命名格式：工作区名-SYYYY-EXXX-YYYYMMDD-HHMMSS.7z
-			parts := strings.Split(fileName, "-")
-			if len(parts) >= 4 {
-				// 检查是否有S开头的部分和E开头的部分
-				hasS := false
-				hasE := false
-				for _, part := range parts {
-					if strings.HasPrefix(part, "S") && len(part) == 5 {
-						hasS = true
-					}
-					if strings.HasPrefix(part, "E") && len(part) == 4 {
-						hasE = true
-					}
-				}
-				if hasS && hasE {
-					return nil // 跳过标准交付包
-				}
-			}
+		info, err := d.Info()
+		if err != nil {
+			log.Printf("Indexer: Could not get FileInfo for %s: %v", path, err)
+			return nil // 跳过无法获取信息的文件
 		}
 
-		// 创建文件信息
+		// 创建 FileInfo 对象
 		fileInfo := &types.FileInfo{
-			Path:        path,
-			Name:        info.Name(),
-			Size:        info.Size(),
-			ModTime:     info.ModTime(),
-			ContentHash: "",                    // 暂时为空，后续计算
-			Status:      types.StatusUnchanged, // 默认为未变更
+			Path:    path,
+			Name:    info.Name(),
+			Size:    info.Size(),
+			ModTime: info.ModTime(),
+			Status:  types.StatusUnchanged, // 默认状态
 		}
 
-		// 使用绝对路径作为key
-		currentFiles[path] = fileInfo
+		files[path] = fileInfo
+		processedFiles++
+
+		// 每处理100个文件报告一次进度，避免过于频繁的回调
+		if callback != nil && processedFiles%100 == 0 {
+			callback(processedFiles, totalFiles)
+		}
 
 		return nil
 	})
 
-	return currentFiles, err
+	if err != nil {
+		log.Printf("Indexer: A critical error occurred during scanning: %v", err)
+		return nil, err
+	}
+
+	// 确保最后一次进度被报告
+	if callback != nil {
+		callback(processedFiles, totalFiles)
+	}
+
+	log.Printf("Indexer: Finished scanning. Processed %d files.", processedFiles)
+	return files, nil
 }
 
 // QuickScan 快速扫描：对比元数据，找出嫌疑人
@@ -180,12 +202,12 @@ func (i *Manager) CompareWithManifest(currentFiles map[string]*types.FileInfo, p
 	return i.QuickScan(currentFiles, previousManifest)
 }
 
-// GetScanProgress 获取扫描进度
+// GetScanProgress 获取扫描进度 (兼容旧版，后续会废弃)
 func (m *Manager) GetScanProgress() float64 {
-	return m.scanProgress
+	return 0
 }
 
-// GetScanStatus 获取扫描状态
+// GetScanStatus 获取扫描状态 (兼容旧版，后续会废弃)
 func (m *Manager) GetScanStatus() string {
-	return m.scanStatus
+	return " "
 }

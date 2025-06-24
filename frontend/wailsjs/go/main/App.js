@@ -6,10 +6,6 @@ export function CopyToClipboard(arg1) {
   return window['go']['main']['App']['CopyToClipboard'](arg1);
 }
 
-export function GeneratePassword() {
-  return window['go']['main']['App']['GeneratePassword']();
-}
-
 export function ScanWorkspace(arg1) {
   return window['go']['main']['App']['ScanWorkspace'](arg1);
 }
